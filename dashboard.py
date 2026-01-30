@@ -197,7 +197,8 @@ st.markdown("---")
 st.markdown("### 📋 Detalle por Sucursal")
 
 df_tabla = df_cliente[['sucursal', 'objRefacc', 'resRefacc', 'objBgo', 'resBgo', 'objTotal', 'resTotal']].copy()
-df_tabla['% Cumpl.'] = (df_tabla['resTotal'] / df_tabla['objTotal'] * 100).fillna(0).round(0).astype(int).astype(str) + '%'
+pct_cumpl = df_tabla.apply(lambda row: (row['resTotal'] / row['objTotal'] * 100) if row['objTotal'] > 0 else 0, axis=1)
+df_tabla['% Cumpl.'] = pct_cumpl.round(0).astype(int).astype(str) + '%'
 
 # Formatear columnas como pesos
 df_tabla['objRefacc'] = df_tabla['objRefacc'].apply(formato_pesos)
@@ -214,3 +215,4 @@ st.dataframe(df_tabla, use_container_width=True, hide_index=True)
 # Nota
 st.markdown("---")
 st.info("📌 **Nota:** Para obtener el descuento del 35% es necesario cubrir el 100% del objetivo de cada categoría, incluyendo manejo de Excellon al 100%.")
+
