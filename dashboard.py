@@ -250,7 +250,7 @@ def generar_pdf(cliente, df_cliente, metricas):
     pdf.set_xy(15, pdf.get_y() + 5)
     pdf.multi_cell(180, 5, 'Nota: Para obtener el descuento del 35% es necesario cubrir el 100% del objetivo de cada categoria, incluyendo manejo de Excellon al 100%.')
     
-    return pdf.output()
+    return bytes(pdf.output())
 
 # ═══════════════════════════════════════════════════════════════════
 # CARGAR DATOS
@@ -454,3 +454,4 @@ if st.button("📄 Generar PDF", type="primary"):
             st.success("✅ PDF generado correctamente. Haz clic en 'Descargar PDF'")
         except Exception as e:
             st.error(f"Error al generar PDF: {e}")
+
