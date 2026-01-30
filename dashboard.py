@@ -11,6 +11,9 @@ from datetime import datetime
 
 # Para PDF
 from fpdf import FPDF
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 import tempfile
 import os
 
@@ -37,7 +40,7 @@ def formato_pesos(valor):
 # FUNCIÓN PARA GENERAR PDF
 # ═══════════════════════════════════════════════════════════════════
 
-def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
+def generar_pdf(cliente, df_cliente, metricas):
     """Genera un PDF profesional del dashboard"""
     
     # Crear PDF
@@ -78,9 +81,7 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
     pdf.set_y(50)
     pdf.set_text_color(0, 0, 0)
     
-    # Fila de KPIs
     kpi_width = 45
-    kpi_height = 25
     start_x = 12
     
     kpis = [
@@ -94,7 +95,7 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
         x = start_x + (i * 48)
         
         pdf.set_fill_color(241, 245, 249)
-        pdf.rect(x, 50, kpi_width, kpi_height, 'F')
+        pdf.rect(x, 50, kpi_width, 25, 'F')
         
         pdf.set_text_color(100, 116, 139)
         pdf.set_font('Helvetica', '', 9)
@@ -118,9 +119,6 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
     ]
     
     for nombre, pct, res, obj in barras:
-        y_pos = pdf.get_y()
-        
-        # Nombre y valores
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_text_color(0, 0, 0)
         pdf.cell(40, 6, nombre)
@@ -129,7 +127,6 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
         pdf.set_text_color(100, 116, 139)
         pdf.cell(80, 6, f'{formato_pesos(res)} / {formato_pesos(obj)}')
         
-        # Color según porcentaje
         if pct >= 100:
             r, g, b = 34, 197, 94
         elif pct >= 70:
@@ -143,32 +140,67 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
         pdf.set_font('Helvetica', 'B', 10)
         pdf.cell(30, 6, f'{pct:.0f}%', align='R', ln=True)
         
-        # Barra de fondo
         pdf.set_fill_color(226, 232, 240)
         pdf.rect(12, pdf.get_y(), 186, 6, 'F')
         
-        # Barra de progreso
         pdf.set_fill_color(r, g, b)
         barra_ancho = min(pct, 100) / 100 * 186
         pdf.rect(12, pdf.get_y(), barra_ancho, 6, 'F')
         
         pdf.set_y(pdf.get_y() + 10)
     
-    # ═══ GRÁFICAS ═══
+    # ═══ GRÁFICAS CON MATPLOTLIB ═══
     pdf.set_y(pdf.get_y() + 5)
     pdf.set_text_color(0, 0, 0)
     pdf.set_font('Helvetica', 'B', 12)
     pdf.cell(0, 10, 'Visualizaciones', ln=True)
     
-    # Guardar gráficas como imágenes temporales
     with tempfile.TemporaryDirectory() as tmpdir:
         # Gráfica de barras
+        fig1, ax1 = plt.subplots(figsize=(5, 3.5))
+        categorias = ['REFACC', 'BGO']
+        objetivos = [metricas['obj_refacc'], metricas['obj_bgo']]
+        resultados = [metricas['res_refacc'], metricas['res_bgo']]
+        
+        x = range(len(categorias))
+        width = 0.35
+        
+        bars1 = ax1.bar([i - width/2 for i in x], objetivos, width, label='Objetivo', color='#3b82f6')
+        bars2 = ax1.bar([i + width/2 for i in x], resultados, width, label='Resultado', 
+                        color=[color_semaforo(metricas['pct_refacc']), color_semaforo(metricas['pct_bgo'])])
+        
+        ax1.set_ylabel('Pesos')
+        ax1.set_title('Objetivo vs Resultado')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(categorias)
+        ax1.legend()
+        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+        
+        plt.tight_layout()
         img_barras = os.path.join(tmpdir, 'barras.png')
-        fig_barras.write_image(img_barras, width=400, height=300, scale=2)
+        fig1.savefig(img_barras, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close(fig1)
         
         # Gráfica de dona
+        fig2, ax2 = plt.subplots(figsize=(5, 3.5))
+        alcanzado = metricas['res_total']
+        pendiente = max(0, metricas['obj_total'] - metricas['res_total'])
+        
+        sizes = [alcanzado, pendiente]
+        colors_pie = ['#22c55e', '#e2e8f0']
+        
+        wedges, texts, autotexts = ax2.pie(sizes, colors=colors_pie, autopct='%1.0f%%',
+                                            startangle=90, pctdistance=0.85,
+                                            wedgeprops=dict(width=0.4))
+        
+        ax2.text(0, 0, f'{metricas["pct_total"]:.0f}%', ha='center', va='center', fontsize=20, fontweight='bold')
+        ax2.set_title('Cumplimiento Global')
+        ax2.legend(['Alcanzado', 'Pendiente'], loc='lower center', bbox_to_anchor=(0.5, -0.1))
+        
+        plt.tight_layout()
         img_dona = os.path.join(tmpdir, 'dona.png')
-        fig_dona.write_image(img_dona, width=400, height=300, scale=2)
+        fig2.savefig(img_dona, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close(fig2)
         
         # Insertar gráficas
         y_graficas = pdf.get_y()
@@ -181,7 +213,6 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
     pdf.set_font('Helvetica', 'B', 12)
     pdf.cell(0, 10, 'Detalle por Sucursal', ln=True)
     
-    # Headers de tabla
     pdf.set_fill_color(30, 41, 59)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('Helvetica', 'B', 8)
@@ -193,14 +224,14 @@ def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
         pdf.cell(width, 8, header, border=1, align='C', fill=True)
     pdf.ln()
     
-    # Datos de tabla
     pdf.set_text_color(0, 0, 0)
     pdf.set_font('Helvetica', '', 7)
     
     for _, row in df_cliente.iterrows():
         pct = (row['resTotal'] / row['objTotal'] * 100) if row['objTotal'] > 0 else 0
         
-        pdf.cell(col_widths[0], 6, str(row['sucursal'])[:28], border=1)
+        sucursal_text = str(row['sucursal'])[:28]
+        pdf.cell(col_widths[0], 6, sucursal_text, border=1)
         pdf.cell(col_widths[1], 6, formato_pesos(row['objRefacc']), border=1, align='R')
         pdf.cell(col_widths[2], 6, formato_pesos(row['resRefacc']), border=1, align='R')
         pdf.cell(col_widths[3], 6, formato_pesos(row['objBgo']), border=1, align='R')
@@ -234,7 +265,6 @@ df = pd.DataFrame(DATOS)
 params = st.query_params
 cliente_url = params.get("cliente", None)
 
-# Sidebar
 st.sidebar.markdown("## 🏍️ MotoDrive")
 st.sidebar.markdown("---")
 
@@ -413,7 +443,7 @@ st.markdown("### 📥 Descargar Reporte")
 if st.button("📄 Generar PDF", type="primary"):
     with st.spinner("Generando PDF..."):
         try:
-            pdf_bytes = generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona)
+            pdf_bytes = generar_pdf(cliente, df_cliente, metricas)
             
             st.download_button(
                 label="⬇️ Descargar PDF",
