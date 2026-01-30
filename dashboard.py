@@ -1,14 +1,18 @@
 # ═══════════════════════════════════════════════════════════════════
 # DASHBOARD MOTODRIVE - BAJAJ
 # ═══════════════════════════════════════════════════════════════════
-# Los clientes acceden con su link único:
-# https://tu-dashboard.streamlit.app/?cliente=NOMBRE_CLIENTE
-# ═══════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datos import DATOS, CLIENTES
+from io import BytesIO
+from datetime import datetime
+
+# Para PDF
+from fpdf import FPDF
+import tempfile
+import os
 
 # Configuración de la página
 st.set_page_config(page_title="MotoDrive - Objetivos", page_icon="🏍️", layout="wide")
@@ -30,6 +34,194 @@ def formato_pesos(valor):
     return f"${valor:,.0f}"
 
 # ═══════════════════════════════════════════════════════════════════
+# FUNCIÓN PARA GENERAR PDF
+# ═══════════════════════════════════════════════════════════════════
+
+def generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona):
+    """Genera un PDF profesional del dashboard"""
+    
+    # Crear PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # ═══ HEADER ═══
+    pdf.set_fill_color(220, 38, 38)  # Rojo
+    pdf.rect(10, 10, 190, 30, 'F')
+    
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 20)
+    pdf.set_xy(15, 15)
+    pdf.cell(0, 10, 'MOTODRIVE - Dashboard de Objetivos', ln=True)
+    
+    pdf.set_font('Helvetica', '', 12)
+    pdf.set_xy(15, 28)
+    pdf.cell(0, 10, f'Cliente: {cliente} | {len(df_cliente)} sucursales | {datetime.now().strftime("%B %Y").title()}')
+    
+    # ═══ DESCUENTO ═══
+    pdf.set_fill_color(30, 41, 59)
+    pdf.rect(160, 10, 40, 30, 'F')
+    pdf.set_text_color(148, 163, 184)
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_xy(160, 14)
+    pdf.cell(40, 5, 'Descuento', align='C')
+    
+    if metricas['descuento'] == 35:
+        pdf.set_text_color(34, 197, 94)  # Verde
+    else:
+        pdf.set_text_color(59, 130, 246)  # Azul
+    pdf.set_font('Helvetica', 'B', 24)
+    pdf.set_xy(160, 22)
+    pdf.cell(40, 12, f"{metricas['descuento']}%", align='C')
+    
+    # ═══ KPIs ═══
+    pdf.set_y(50)
+    pdf.set_text_color(0, 0, 0)
+    
+    # Fila de KPIs
+    kpi_width = 45
+    kpi_height = 25
+    start_x = 12
+    
+    kpis = [
+        ('Objetivo', formato_pesos(metricas['obj_total']), (59, 130, 246)),
+        ('Resultado', formato_pesos(metricas['res_total']), (34, 197, 94) if metricas['pct_total'] >= 100 else (234, 179, 8)),
+        ('Cumplimiento', f"{metricas['pct_total']:.0f}%", (34, 197, 94) if metricas['pct_total'] >= 100 else (234, 179, 8)),
+        ('Pedidos', formato_pesos(metricas['pedidos']), (139, 92, 246))
+    ]
+    
+    for i, (label, value, color) in enumerate(kpis):
+        x = start_x + (i * 48)
+        
+        pdf.set_fill_color(241, 245, 249)
+        pdf.rect(x, 50, kpi_width, kpi_height, 'F')
+        
+        pdf.set_text_color(100, 116, 139)
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_xy(x, 52)
+        pdf.cell(kpi_width, 5, label, align='C')
+        
+        pdf.set_text_color(*color)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_xy(x, 60)
+        pdf.cell(kpi_width, 10, value, align='C')
+    
+    # ═══ BARRAS DE AVANCE ═══
+    pdf.set_y(85)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(0, 10, 'Avance por Categoria', ln=True)
+    
+    barras = [
+        ('REFACCIONES', metricas['pct_refacc'], metricas['res_refacc'], metricas['obj_refacc']),
+        ('BGO', metricas['pct_bgo'], metricas['res_bgo'], metricas['obj_bgo'])
+    ]
+    
+    for nombre, pct, res, obj in barras:
+        y_pos = pdf.get_y()
+        
+        # Nombre y valores
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(40, 6, nombre)
+        
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(80, 6, f'{formato_pesos(res)} / {formato_pesos(obj)}')
+        
+        # Color según porcentaje
+        if pct >= 100:
+            r, g, b = 34, 197, 94
+        elif pct >= 70:
+            r, g, b = 234, 179, 8
+        elif pct >= 50:
+            r, g, b = 249, 115, 22
+        else:
+            r, g, b = 239, 68, 68
+        
+        pdf.set_text_color(r, g, b)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.cell(30, 6, f'{pct:.0f}%', align='R', ln=True)
+        
+        # Barra de fondo
+        pdf.set_fill_color(226, 232, 240)
+        pdf.rect(12, pdf.get_y(), 186, 6, 'F')
+        
+        # Barra de progreso
+        pdf.set_fill_color(r, g, b)
+        barra_ancho = min(pct, 100) / 100 * 186
+        pdf.rect(12, pdf.get_y(), barra_ancho, 6, 'F')
+        
+        pdf.set_y(pdf.get_y() + 10)
+    
+    # ═══ GRÁFICAS ═══
+    pdf.set_y(pdf.get_y() + 5)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(0, 10, 'Visualizaciones', ln=True)
+    
+    # Guardar gráficas como imágenes temporales
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Gráfica de barras
+        img_barras = os.path.join(tmpdir, 'barras.png')
+        fig_barras.write_image(img_barras, width=400, height=300, scale=2)
+        
+        # Gráfica de dona
+        img_dona = os.path.join(tmpdir, 'dona.png')
+        fig_dona.write_image(img_dona, width=400, height=300, scale=2)
+        
+        # Insertar gráficas
+        y_graficas = pdf.get_y()
+        pdf.image(img_barras, x=10, y=y_graficas, w=95)
+        pdf.image(img_dona, x=105, y=y_graficas, w=95)
+    
+    # ═══ TABLA DE SUCURSALES ═══
+    pdf.add_page()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(0, 10, 'Detalle por Sucursal', ln=True)
+    
+    # Headers de tabla
+    pdf.set_fill_color(30, 41, 59)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 8)
+    
+    col_widths = [50, 25, 25, 22, 22, 25, 25, 16]
+    headers = ['Sucursal', 'Obj Refacc', 'Res Refacc', 'Obj BGO', 'Res BGO', 'Obj Total', 'Res Total', '% Cumpl']
+    
+    for i, (header, width) in enumerate(zip(headers, col_widths)):
+        pdf.cell(width, 8, header, border=1, align='C', fill=True)
+    pdf.ln()
+    
+    # Datos de tabla
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', '', 7)
+    
+    for _, row in df_cliente.iterrows():
+        pct = (row['resTotal'] / row['objTotal'] * 100) if row['objTotal'] > 0 else 0
+        
+        pdf.cell(col_widths[0], 6, str(row['sucursal'])[:28], border=1)
+        pdf.cell(col_widths[1], 6, formato_pesos(row['objRefacc']), border=1, align='R')
+        pdf.cell(col_widths[2], 6, formato_pesos(row['resRefacc']), border=1, align='R')
+        pdf.cell(col_widths[3], 6, formato_pesos(row['objBgo']), border=1, align='R')
+        pdf.cell(col_widths[4], 6, formato_pesos(row['resBgo']), border=1, align='R')
+        pdf.cell(col_widths[5], 6, formato_pesos(row['objTotal']), border=1, align='R')
+        pdf.cell(col_widths[6], 6, formato_pesos(row['resTotal']), border=1, align='R')
+        pdf.cell(col_widths[7], 6, f'{pct:.0f}%', border=1, align='C')
+        pdf.ln()
+    
+    # ═══ NOTA ═══
+    pdf.set_y(-40)
+    pdf.set_fill_color(241, 245, 249)
+    pdf.rect(10, pdf.get_y(), 190, 20, 'F')
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_xy(15, pdf.get_y() + 5)
+    pdf.multi_cell(180, 5, 'Nota: Para obtener el descuento del 35% es necesario cubrir el 100% del objetivo de cada categoria, incluyendo manejo de Excellon al 100%.')
+    
+    return pdf.output()
+
+# ═══════════════════════════════════════════════════════════════════
 # CARGAR DATOS
 # ═══════════════════════════════════════════════════════════════════
 
@@ -39,7 +231,6 @@ df = pd.DataFrame(DATOS)
 # LEER CLIENTE DESDE URL O SELECTOR
 # ═══════════════════════════════════════════════════════════════════
 
-# Intentar leer cliente desde la URL
 params = st.query_params
 cliente_url = params.get("cliente", None)
 
@@ -47,7 +238,6 @@ cliente_url = params.get("cliente", None)
 st.sidebar.markdown("## 🏍️ MotoDrive")
 st.sidebar.markdown("---")
 
-# Si hay cliente en URL, usarlo. Si no, mostrar selector
 if cliente_url and cliente_url in CLIENTES:
     cliente = cliente_url
     st.sidebar.success(f"👤 Cliente: **{cliente}**")
@@ -55,13 +245,10 @@ else:
     st.sidebar.markdown("### 🔍 Seleccionar Cliente")
     cliente = st.sidebar.selectbox("👤 Cliente:", CLIENTES)
 
-# Filtrar por cliente
 df_cliente = df[df['clientName'] == cliente].copy()
 
-# Info en sidebar
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"📊 **{len(df_cliente)}** sucursales")
-st.sidebar.markdown(f"📅 Datos actualizados")
 
 # ═══════════════════════════════════════════════════════════════════
 # CALCULAR MÉTRICAS
@@ -79,7 +266,6 @@ pct_refacc = (res_refacc / obj_refacc * 100) if obj_refacc > 0 else 0
 pct_bgo = (res_bgo / obj_bgo * 100) if obj_bgo > 0 else 0
 pct_total = (res_total / obj_total * 100) if obj_total > 0 else 0
 
-# Descuento
 if pct_total >= 100 and pct_refacc >= 100 and pct_bgo >= 100:
     descuento = 35
     color_desc = VERDE
@@ -87,11 +273,17 @@ else:
     descuento = 20
     color_desc = AZUL
 
+metricas = {
+    'obj_refacc': obj_refacc, 'obj_bgo': obj_bgo, 'obj_total': obj_total,
+    'res_refacc': res_refacc, 'res_bgo': res_bgo, 'res_total': res_total,
+    'pct_refacc': pct_refacc, 'pct_bgo': pct_bgo, 'pct_total': pct_total,
+    'pedidos': pedidos, 'descuento': descuento
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # MOSTRAR DASHBOARD
 # ═══════════════════════════════════════════════════════════════════
 
-# Header
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown(f"""
@@ -110,7 +302,6 @@ with col2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Métricas
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("🎯 Objetivo", formato_pesos(obj_total))
 c2.metric("💰 Resultado", formato_pesos(res_total))
@@ -119,7 +310,6 @@ c4.metric("📦 Pedidos", formato_pesos(pedidos))
 
 st.markdown("---")
 
-# Barras de progreso
 st.markdown("### 📊 Avance por Categoría")
 
 for nombre, pct, obj, res in [("REFACCIONES", pct_refacc, obj_refacc, res_refacc), 
@@ -140,7 +330,6 @@ for nombre, pct, obj, res in [("REFACCIONES", pct_refacc, obj_refacc, res_refacc
 
 st.markdown("---")
 
-# Gráficas
 st.markdown("### 📈 Visualizaciones")
 
 col_g1, col_g2 = st.columns(2)
@@ -193,26 +382,45 @@ with col_g2:
 
 st.markdown("---")
 
-# Tabla de detalle
 st.markdown("### 📋 Detalle por Sucursal")
 
 df_tabla = df_cliente[['sucursal', 'objRefacc', 'resRefacc', 'objBgo', 'resBgo', 'objTotal', 'resTotal']].copy()
 pct_cumpl = df_tabla.apply(lambda row: (row['resTotal'] / row['objTotal'] * 100) if row['objTotal'] > 0 else 0, axis=1)
 df_tabla['% Cumpl.'] = pct_cumpl.round(0).astype(int).astype(str) + '%'
 
-# Formatear columnas como pesos
-df_tabla['objRefacc'] = df_tabla['objRefacc'].apply(formato_pesos)
-df_tabla['resRefacc'] = df_tabla['resRefacc'].apply(formato_pesos)
-df_tabla['objBgo'] = df_tabla['objBgo'].apply(formato_pesos)
-df_tabla['resBgo'] = df_tabla['resBgo'].apply(formato_pesos)
-df_tabla['objTotal'] = df_tabla['objTotal'].apply(formato_pesos)
-df_tabla['resTotal'] = df_tabla['resTotal'].apply(formato_pesos)
+df_display = df_tabla.copy()
+df_display['objRefacc'] = df_display['objRefacc'].apply(formato_pesos)
+df_display['resRefacc'] = df_display['resRefacc'].apply(formato_pesos)
+df_display['objBgo'] = df_display['objBgo'].apply(formato_pesos)
+df_display['resBgo'] = df_display['resBgo'].apply(formato_pesos)
+df_display['objTotal'] = df_display['objTotal'].apply(formato_pesos)
+df_display['resTotal'] = df_display['resTotal'].apply(formato_pesos)
 
-df_tabla.columns = ['Sucursal', 'Obj Refacc', 'Res Refacc', 'Obj BGO', 'Res BGO', 'Obj Total', 'Res Total', '% Cumpl.']
+df_display.columns = ['Sucursal', 'Obj Refacc', 'Res Refacc', 'Obj BGO', 'Res BGO', 'Obj Total', 'Res Total', '% Cumpl.']
 
-st.dataframe(df_tabla, use_container_width=True, hide_index=True)
+st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-# Nota
 st.markdown("---")
 st.info("📌 **Nota:** Para obtener el descuento del 35% es necesario cubrir el 100% del objetivo de cada categoría, incluyendo manejo de Excellon al 100%.")
 
+# ═══════════════════════════════════════════════════════════════════
+# BOTÓN DE DESCARGA PDF
+# ═══════════════════════════════════════════════════════════════════
+
+st.markdown("---")
+st.markdown("### 📥 Descargar Reporte")
+
+if st.button("📄 Generar PDF", type="primary"):
+    with st.spinner("Generando PDF..."):
+        try:
+            pdf_bytes = generar_pdf(cliente, df_cliente, metricas, fig_barras, fig_dona)
+            
+            st.download_button(
+                label="⬇️ Descargar PDF",
+                data=pdf_bytes,
+                file_name=f"Reporte_{cliente.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
+            st.success("✅ PDF generado correctamente. Haz clic en 'Descargar PDF'")
+        except Exception as e:
+            st.error(f"Error al generar PDF: {e}")
